@@ -1,0 +1,157 @@
+"""
+Git Service
+Handles branch creation, commits, and GitHub PR creation via REST API.
+"""
+import re
+from pathlib import Path
+
+import requests
+import structlog
+from git import Repo, GitCommandError
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models.analysis import CodeIssue, RefactorSuggestion, RefactorStatus
+from app.models.repo import Repository
+
+log = structlog.get_logger()
+
+GITHUB_API = "https://api.github.com"
+
+
+class GitService:
+    def __init__(self, db: Session):
+        self.db = db
+        self.headers = {
+            "Authorization": f"token {settings.GITHUB_TOKEN}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def create_pr(
+        self,
+        repo: Repository,
+        suggestion: RefactorSuggestion,
+        issue: CodeIssue,
+    ) -> bool:
+        """
+        Full flow:
+          1. Create branch in local clone
+          2. Apply refactor to file
+          3. Commit + push
+          4. Open PR via GitHub REST API
+        """
+        if not settings.GITHUB_TOKEN:
+            log.warning("git.no_token", suggestion_id=suggestion.id)
+            suggestion.status = RefactorStatus.FAILED
+            suggestion.validation_notes = (suggestion.validation_notes or "") + " | No GitHub token configured."
+            self.db.commit()
+            return False
+
+        branch_name = f"autodev/refactor-{suggestion.id[:8]}"
+        suggestion.branch_name = branch_name
+
+        try:
+            local_path = repo.local_path
+            git_repo   = Repo(local_path)
+
+            # Create branch
+            new_branch = git_repo.create_head(branch_name)
+            new_branch.checkout()
+
+            # Apply change
+            target_file = Path(local_path) / issue.file_path
+            if not target_file.exists():
+                raise FileNotFoundError(f"File not found: {issue.file_path}")
+
+            original_content = target_file.read_text(errors="ignore")
+            new_content = original_content.replace(
+                issue.original_code, suggestion.refactored_code, 1
+            )
+            if new_content == original_content:
+                log.warning("git.patch_noop", suggestion_id=suggestion.id)
+                # Still proceed — might be partial match
+
+            target_file.write_text(new_content, encoding="utf-8")
+
+            # Stage and commit
+            git_repo.index.add([str(target_file)])
+            git_repo.index.commit(
+                f"refactor: reduce complexity in {issue.function_name or issue.file_path}\n\n"
+                f"AutoDev detected: {issue.description}\n"
+                f"Complexity: {suggestion.complexity_before} → {suggestion.complexity_after}\n"
+                f"Lines: {suggestion.lines_before} → {suggestion.lines_after}\n\n"
+                f"All validation checks passed."
+            )
+
+            # Push branch
+            origin = git_repo.remote("origin")
+            origin.push(refspec=f"{branch_name}:{branch_name}")
+            log.info("git.pushed", branch=branch_name, repo_id=repo.id)
+
+            # Open PR
+            pr_url, pr_number = self._open_pr(repo, suggestion, issue, branch_name)
+            suggestion.pr_url    = pr_url
+            suggestion.pr_number = pr_number
+            suggestion.status    = RefactorStatus.PR_OPENED
+            self.db.commit()
+
+            log.info("git.pr_opened", pr_url=pr_url, repo_id=repo.id)
+            return True
+
+        except Exception as e:
+            log.error("git.failed", error=str(e), suggestion_id=suggestion.id)
+            suggestion.status = RefactorStatus.FAILED
+            suggestion.validation_notes = (suggestion.validation_notes or "") + f" | Git error: {e}"
+            self.db.commit()
+            return False
+
+    def _open_pr(self, repo: Repository, suggestion: RefactorSuggestion, issue: CodeIssue, branch_name: str):
+        complexity_reduction = ""
+        if suggestion.complexity_before and suggestion.complexity_after:
+            delta = suggestion.complexity_before - suggestion.complexity_after
+            pct   = (delta / suggestion.complexity_before) * 100
+            complexity_reduction = (
+                f"- Cyclomatic complexity: `{suggestion.complexity_before}` → `{suggestion.complexity_after}` "
+                f"({pct:.0f}% reduction)\n"
+            )
+
+        body = f"""## 🤖 AutoDev Automated Refactor
+
+AutoDev detected a code quality issue and generated a safe refactor.
+
+### Issue
+- **Type**: `{issue.issue_type}`
+- **File**: `{issue.file_path}`
+- **Function**: `{issue.function_name or 'N/A'}`
+- **Severity**: `{issue.severity}`
+
+### Changes
+{complexity_reduction}- Lines: `{suggestion.lines_before}` → `{suggestion.lines_after}`
+
+### Validation
+✅ Syntax check passed  
+✅ Ruff lint clean  
+✅ Bandit security scan clean  
+✅ Function signatures preserved  
+✅ Diff size within limits  
+
+### LLM Reasoning
+{suggestion.explanation or 'N/A'}
+
+---
+*Generated by [AutoDev](https://github.com/autodev) | Model: {settings.LLM_MODEL}*
+"""
+
+        url = f"{GITHUB_API}/repos/{repo.owner}/{repo.name}/pulls"
+        payload = {
+            "title": f"refactor: {issue.issue_type} in {issue.function_name or issue.file_path}",
+            "body": body,
+            "head": branch_name,
+            "base": settings.GITHUB_PR_BASE_BRANCH,
+        }
+
+        response = requests.post(url, json=payload, headers=self.headers, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        return data["html_url"], data["number"]

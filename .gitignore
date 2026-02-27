@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+/tmp/autodev_repos/
+.next/
+node_modules/
+*.log
+postgres_data/
+redis_data/
