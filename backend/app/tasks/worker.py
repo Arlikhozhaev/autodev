@@ -1,15 +1,14 @@
 """
 Celery Worker — Async task definitions.
-Each task handles one step of the pipeline. 
+Each task handles one step of the pipeline.
 The full pipeline task orchestrates all steps end-to-end.
 """
 from celery import Celery
-from celery.utils.log import get_task_logger
 
 from app.config import settings
 from app.database import SessionLocal
 from app.models.repo import Repository, RepoStatus
-from app.models.analysis import CodeIssue, RefactorSuggestion, IssueType
+from app.models.analysis import CodeIssue, IssueType
 
 import structlog
 log = structlog.get_logger()

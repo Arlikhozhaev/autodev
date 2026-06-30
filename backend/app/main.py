@@ -2,6 +2,8 @@
 AutoDev - Self-Healing Codebase Agent
 FastAPI Application Entry Point
 """
+import logging
+
 import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -11,6 +13,31 @@ from app.config import settings
 from app.database import engine, Base
 from app.api.routes import router
 
+
+def _configure_logging() -> None:
+    level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
+    shared_processors = [
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+    ]
+    if settings.LOG_FORMAT == "json":
+        processors = shared_processors + [structlog.processors.JSONRenderer()]
+    else:
+        processors = shared_processors + [structlog.dev.ConsoleRenderer()]
+
+    structlog.configure(
+        processors=processors,
+        wrapper_class=structlog.stdlib.BoundLogger,
+        context_class=dict,
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
+    logging.basicConfig(level=level, format="%(message)s")
+
+
+_configure_logging()
 log = structlog.get_logger()
 
 
@@ -18,7 +45,11 @@ log = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     log.info("autodev.startup", version="1.0.0", env=settings.ENV)
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        # Enum types already exist on container restart — safe to ignore
+        log.warning("autodev.db_init_warning", error=str(e))
     yield
     log.info("autodev.shutdown")
 

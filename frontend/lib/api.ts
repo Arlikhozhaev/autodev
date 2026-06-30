@@ -28,6 +28,9 @@ export const api = {
   getStats: () => request<Stats>("/stats"),
   triggerRefactor: (issueId: string) =>
     request("/refactor", { method: "POST", body: JSON.stringify({ issue_id: issueId }) }),
+
+  deleteRepo: (id: string) =>
+    request(`/repos/${id}`, { method: "DELETE" }),
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -53,6 +56,7 @@ export interface Issue {
   metric_value: number | null;
   line_start: number | null;
   line_end: number | null;
+  original_code?: string | null;
 }
 
 export interface Report {
@@ -84,6 +88,13 @@ export interface Refactor {
   pr_number: number | null;
   tokens_used: number;
   created_at: string;
+  explanation?: string | null;
+  validation_notes?: string | null;
+  refactored_code?: string | null;
+  original_code?: string | null;
+  function_name?: string | null;
+  file_path?: string | null;
+  branch_name?: string | null;
 }
 
 export interface Stats {

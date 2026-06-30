@@ -2,6 +2,7 @@
 
 > AI-powered autonomous code analysis, refactoring, and PR automation.
 
+[![CI](https://github.com/Arlikhozhaev/autodev/actions/workflows/ci.yml/badge.svg)](https://github.com/Arlikhozhaev/autodev/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)](https://fastapi.tiangolo.com)
 [![Claude](https://img.shields.io/badge/LLM-Claude%20claude--opus--4--6-purple)](https://anthropic.com)
@@ -142,7 +143,7 @@ Response:
 AutoDev applies **5 layers of validation** before opening any PR:
 
 1. **Syntax check** — AST parse of refactored code
-2. **Diff validator** — size change < 30%, no unexpected imports
+2. **Diff validator** — syntax check, signature preservation, import allowlist, size bounds
 3. **Signature check** — all public function signatures preserved
 4. **Lint gate** — Ruff must pass with no E/W/F errors
 5. **Test gate** — pytest must pass if tests exist
@@ -172,8 +173,11 @@ autodev/
 │   │   │   └── git_service.py        # Branch + commit + PR
 │   │   ├── tasks/worker.py      # Celery tasks
 │   │   └── utils/
-│   │       ├── ast_parser.py    # Python AST extraction
+│   │       ├── ast_parser.py    # Python AST extraction (stdlib ast)
 │   │       └── diff_validator.py # Diff safety checks
+│   ├── tests/                   # pytest suite (DiffValidator, AST, API)
+│   ├── pytest.ini
+│   ├── ruff.toml
 │   ├── requirements.txt
 │   └── alembic.ini
 ├── frontend/
@@ -181,9 +185,11 @@ autodev/
 │   │   ├── page.tsx             # Main dashboard
 │   │   └── layout.tsx
 │   ├── lib/api.ts               # Typed API client
+│   ├── tsconfig.json
 │   ├── package.json
 │   └── Dockerfile
 ├── docker-compose.yml
+├── .github/workflows/ci.yml     # Ruff + pytest + frontend build
 ├── Dockerfile
 ├── .env.example
 └── README.md
@@ -213,13 +219,24 @@ npm install && npm run dev
 
 ```bash
 cd backend
+pip install -r requirements.txt
 pytest tests/ -v
+```
+
+### Lint (backend)
+
+```bash
+cd backend
+pip install ruff
+ruff check app tests
 ```
 
 ---
 
 ## Roadmap
 
+- [x] CI pipeline (GitHub Actions: ruff, pytest, frontend build)
+- [x] Backend test suite (DiffValidator, AST parser, API)
 - [ ] Multi-language support (JavaScript/TypeScript)
 - [ ] Embedding-based duplicate function detection
 - [ ] CLI: `autodev analyze ./project`
@@ -231,6 +248,8 @@ pytest tests/ -v
 ---
 
 ## Benchmarks
+
+> Illustrative targets from internal runs — not guaranteed for every repository.
 
 | Metric | Result |
 |---|---|

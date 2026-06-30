@@ -96,5 +96,7 @@ class RefactorSuggestion(Base):
     branch_name: Mapped[str] = mapped_column(String(255), nullable=True)
     tokens_used: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    applied_commit_sha: Mapped[str] = mapped_column(String(40), nullable=True)
+    source_file_hash: Mapped[str] = mapped_column(String(64), nullable=True)
 
     issue: Mapped["CodeIssue"] = relationship("CodeIssue", back_populates="refactor")

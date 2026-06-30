@@ -1,19 +1,17 @@
 """
 All API routes for AutoDev.
 """
-from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel, HttpUrl
+import os
+import shutil
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.repo import Repository, RepoStatus
 from app.models.analysis import AnalysisReport, CodeIssue, RefactorSuggestion, RefactorStatus
-from app.tasks.worker import (
-    task_full_pipeline,
-    task_analyze_repo,
-    task_refactor_issue,
-)
+from app.tasks.worker import task_full_pipeline, task_refactor_issue
 import structlog
 
 log = structlog.get_logger()
@@ -135,6 +133,7 @@ def get_report(repo_id: str, db: Session = Depends(get_db)):
                 "metric_value": i.metric_value,
                 "line_start": i.line_start,
                 "line_end": i.line_end,
+                "original_code": i.original_code,
             }
             for i in issues
         ],
@@ -146,8 +145,10 @@ def list_refactors(repo_id: str, db: Session = Depends(get_db)):
     suggestions = db.query(RefactorSuggestion).filter(
         RefactorSuggestion.repo_id == repo_id
     ).all()
-    return [
-        {
+    result = []
+    for s in suggestions:
+        issue = db.query(CodeIssue).filter(CodeIssue.id == s.issue_id).first()
+        result.append({
             "id": s.id,
             "issue_id": s.issue_id,
             "status": s.status,
@@ -156,13 +157,19 @@ def list_refactors(repo_id: str, db: Session = Depends(get_db)):
             "lines_before": s.lines_before,
             "lines_after": s.lines_after,
             "validation_passed": s.validation_passed,
+            "validation_notes": s.validation_notes,
             "pr_url": s.pr_url,
             "pr_number": s.pr_number,
             "tokens_used": s.tokens_used,
+            "branch_name": s.branch_name,
+            "explanation": s.explanation,
+            "refactored_code": s.refactored_code,
+            "original_code": issue.original_code if issue else None,
+            "function_name": issue.function_name if issue else None,
+            "file_path": issue.file_path if issue else None,
             "created_at": s.created_at,
-        }
-        for s in suggestions
-    ]
+        })
+    return result
 
 
 @router.post("/refactor", tags=["Refactors"])
@@ -175,6 +182,34 @@ def trigger_refactor(req: RefactorRequest, db: Session = Depends(get_db)):
     return {"task_id": task.id, "message": "Refactor queued"}
 
 
+@router.delete("/repos/{repo_id}", tags=["Repos"])
+def delete_repo(repo_id: str, db: Session = Depends(get_db)):
+    """Delete a repository and all its associated data."""
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    # Delete in strict dependency order (child before parent)
+    # 1. RefactorSuggestions reference CodeIssues — must go first
+    db.query(RefactorSuggestion).filter(RefactorSuggestion.repo_id == repo_id).delete()
+    # 2. CodeIssues reference AnalysisReports
+    db.query(CodeIssue).filter(CodeIssue.repo_id == repo_id).delete()
+    # 3. AnalysisReports reference Repository
+    db.query(AnalysisReport).filter(AnalysisReport.repo_id == repo_id).delete()
+    # 4. Finally the repo itself
+    db.delete(repo)
+    db.commit()
+
+    # Clean up local clone if it exists
+    if repo.local_path and os.path.exists(repo.local_path):
+        try:
+            shutil.rmtree(repo.local_path)
+        except Exception:
+            pass
+
+    return {"deleted": repo_id}
+
+
 @router.get("/stats", tags=["Dashboard"])
 def global_stats(db: Session = Depends(get_db)):
     """Dashboard-level aggregate stats."""
@@ -185,7 +220,7 @@ def global_stats(db: Session = Depends(get_db)):
         RefactorSuggestion.status == RefactorStatus.PR_OPENED
     ).scalar()
     validated = db.query(func.count(RefactorSuggestion.id)).filter(
-        RefactorSuggestion.validation_passed == True
+        RefactorSuggestion.validation_passed.is_(True)
     ).scalar()
 
     avg_before = db.query(func.avg(RefactorSuggestion.complexity_before)).scalar() or 0

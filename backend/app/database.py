@@ -6,13 +6,21 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.config import settings
 
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    echo=(settings.ENV == "development"),
-)
+
+def _engine_kwargs(database_url: str) -> dict:
+    kwargs: dict = {
+        "pool_pre_ping": True,
+        "echo": settings.ENV == "development",
+    }
+    if database_url.startswith("sqlite"):
+        kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        kwargs["pool_size"] = 10
+        kwargs["max_overflow"] = 20
+    return kwargs
+
+
+engine = create_engine(settings.DATABASE_URL, **_engine_kwargs(settings.DATABASE_URL))
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

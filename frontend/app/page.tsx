@@ -3,15 +3,14 @@
 import { useState, useEffect } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  LineChart, Line, CartesianGrid, Legend, RadarChart, Radar,
-  PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  LineChart, Line, CartesianGrid, Legend,
 } from "recharts";
 import {
   GitBranch, GitPullRequest, Search, AlertTriangle,
-  CheckCircle, XCircle, Clock, Code, Shield, Zap,
+  CheckCircle, XCircle, Clock, Code, Zap,
   TrendingDown, ExternalLink, Loader2, RefreshCw, Plus,
 } from "lucide-react";
-import { api, type Repo, type Stats, type ReportResponse, type Refactor } from "../lib/api";
+import { api, type Repo, type Stats, type ReportResponse, type Refactor, type Issue } from "../lib/api";
 
 // ── Colour palette ───────────────────────────────────────────────────────────
 const C = {
@@ -34,18 +33,27 @@ const SEVERITY_COLOR: Record<string, string> = {
   low:      C.green,
 };
 
+const SPIN_STYLE = { animation: "spin 1s linear infinite" } as const;
+const PULSE_STYLE = { animation: "pulse 2s ease-in-out infinite" } as const;
+
 const STATUS_ICON: Record<string, JSX.Element> = {
   pending:      <Clock    size={14} color={C.yellow} />,
-  cloning:      <Loader2  size={14} color={C.accent} className="animate-spin" />,
-  analyzing:    <Search   size={14} color={C.accent} className="animate-pulse" />,
+  cloning:      <Loader2  size={14} color={C.accent} style={SPIN_STYLE} />,
+  analyzing:    <Search   size={14} color={C.accent} style={PULSE_STYLE} />,
   refactoring:  <Zap      size={14} color="#a855f7" />,
   done:         <CheckCircle size={14} color={C.green} />,
   failed:       <XCircle  size={14} color={C.red} />,
 };
 
 // ── Utility ───────────────────────────────────────────────────────────────────
+const errorMessage = (e: unknown): string =>
+  e instanceof Error ? e.message : "An unexpected error occurred";
+
 const ago = (d: string) => {
-  const secs = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+  // Append Z if no timezone info — DB stores UTC without Z
+  const normalized = d.endsWith("Z") || d.includes("+") ? d : d + "Z";
+  const secs = Math.floor((Date.now() - new Date(normalized).getTime()) / 1000);
+  if (secs < 0) return "just now";
   if (secs < 60) return `${secs}s ago`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
   if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
@@ -94,13 +102,19 @@ function Badge({ text, color }: { text: string; color: string }) {
   );
 }
 
-function IssueRow({ issue, onRefactor }: { issue: any; onRefactor: (id: string) => void }) {
+function IssueRow({ issue, onRefactor }: { issue: Issue; onRefactor: (id: string) => Promise<void> }) {
   const [loading, setLoading] = useState(false);
+  const [done, setDone]       = useState(false);
   const color = SEVERITY_COLOR[issue.severity] || C.muted;
 
   const handleRefactor = async () => {
     setLoading(true);
-    try { await onRefactor(issue.id); } finally { setLoading(false); }
+    try {
+      await onRefactor(issue.id);
+      setDone(true);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -123,16 +137,21 @@ function IssueRow({ issue, onRefactor }: { issue: any; onRefactor: (id: string) 
       <Badge text={issue.severity} color={color} />
       <button
         onClick={handleRefactor}
-        disabled={loading}
+        disabled={loading || done}
         style={{
-          background: C.accent + "22", border: `1px solid ${C.accent}44`,
-          color: C.accent, borderRadius: 6, padding: "4px 10px",
-          fontSize: 11, cursor: "pointer", display: "flex",
-          alignItems: "center", gap: 4, fontWeight: 600,
+          background: done ? C.green + "22" : C.accent + "22",
+          border: `1px solid ${done ? C.green : C.accent}44`,
+          color: done ? C.green : C.accent,
+          borderRadius: 6, padding: "4px 10px",
+          fontSize: 11, cursor: loading || done ? "not-allowed" : "pointer",
+          display: "flex", alignItems: "center", gap: 4, fontWeight: 600,
+          transition: "all 0.2s",
         }}
       >
-        {loading ? <Loader2 size={12} className="animate-spin" /> : <Zap size={12} />}
-        Fix
+        {loading ? <Loader2 size={12} style={{animation: "spin 1s linear infinite"}} /> 
+         : done   ? <CheckCircle size={12} /> 
+                  : <Zap size={12} />}
+        {done ? "Queued" : "Fix"}
       </button>
     </div>
   );
@@ -158,14 +177,21 @@ export default function Dashboard() {
       const [r, s] = await Promise.all([api.listRepos(), api.getStats()]);
       setRepos(r);
       setStats(s);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => { fetchAll(); }, []);
+
+  // Auto-select newest repo once repos load, but only if nothing selected yet
+  useEffect(() => {
+    if (!selectedRepo && repos.length > 0) {
+      loadReport(repos[0].id);
+    }
+  }, [repos, selectedRepo]);
 
   // Auto-refresh every 8s when there are active jobs
   useEffect(() => {
@@ -175,8 +201,13 @@ export default function Dashboard() {
     return () => clearInterval(t);
   }, [repos]);
 
+  const [reportLoading, setReportLoading] = useState(false);
+
   const loadReport = async (repoId: string) => {
     setSelectedRepo(repoId);
+    setReportLoading(true);
+    setReport(null);
+    setRefactors([]);
     try {
       const [rpt, rfcs] = await Promise.all([
         api.getReport(repoId),
@@ -185,9 +216,30 @@ export default function Dashboard() {
       setReport(rpt);
       setRefactors(rfcs);
       setTab("issues");
-    } catch (e: any) {
+    } catch (e: unknown) {
       setReport(null);
       setRefactors([]);
+      const msg = errorMessage(e);
+      if (!msg.includes("404")) {
+        setError(`Failed to load report: ${msg}`);
+      }
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const handleDeleteRepo = async (repoId: string) => {
+    if (!confirm("Delete this repository and all its data?")) return;
+    try {
+      await api.deleteRepo(repoId);
+      if (selectedRepo === repoId) {
+        setSelectedRepo(null);
+        setReport(null);
+        setRefactors([]);
+      }
+      fetchAll();
+    } catch (e: unknown) {
+      showToast(errorMessage(e), "error");
     }
   };
 
@@ -199,19 +251,37 @@ export default function Dashboard() {
       await api.analyzeRepo(repoUrl.trim());
       setRepoUrl("");
       setTimeout(fetchAll, 500);
-    } catch (e: any) {
-      setError(e.message);
+    } catch (e: unknown) {
+      setError(errorMessage(e));
     } finally {
       setSubmitting(false);
     }
   };
 
+  const [toast, setToast] = useState<{msg: string; type: "success"|"error"} | null>(null);
+
+  const showToast = (msg: string, type: "success"|"error" = "success") => {
+    setToast({msg, type});
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const handleRefactor = async (issueId: string) => {
     try {
       await api.triggerRefactor(issueId);
-      if (selectedRepo) setTimeout(() => loadReport(selectedRepo), 1000);
-    } catch (e: any) {
-      setError(e.message);
+      showToast("Refactor queued — Celery is processing it now.");
+      setTab("refactors");
+      // Poll refactors tab until the result appears
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        if (selectedRepo) {
+          const rfcs = await api.getRefactors(selectedRepo);
+          setRefactors(rfcs);
+        }
+        if (attempts >= 20) clearInterval(poll); // stop after ~40s
+      }, 2000);
+    } catch (e: unknown) {
+      showToast(errorMessage(e), "error");
     }
   };
 
@@ -291,6 +361,24 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Toast notification */}
+        {toast && (
+          <div style={{
+            position: "fixed", bottom: 24, right: 24, zIndex: 1000,
+            background: toast.type === "success" ? C.green + "22" : C.red + "22",
+            border: `1px solid ${toast.type === "success" ? C.green : C.red}66`,
+            borderRadius: 10, padding: "12px 20px",
+            color: toast.type === "success" ? C.green : C.red,
+            fontSize: 13, fontWeight: 500,
+            boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+            display: "flex", alignItems: "center", gap: 8,
+            animation: "slideIn 0.2s ease",
+          }}>
+            {toast.type === "success" ? <CheckCircle size={16} /> : <XCircle size={16} />}
+            {toast.msg}
+          </div>
+        )}
+
         {/* Input */}
         <div style={{
           display: "flex", gap: 10, marginBottom: 28,
@@ -320,7 +408,7 @@ export default function Dashboard() {
               transition: "background 0.2s",
             }}
           >
-            {submitting ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+            {submitting ? <Loader2 size={16} style={SPIN_STYLE} /> : <Plus size={16} />}
             Analyze Repo
           </button>
         </div>
@@ -362,7 +450,7 @@ export default function Dashboard() {
             <div style={{ maxHeight: 520, overflowY: "auto" }}>
               {loading && repos.length === 0 ? (
                 <div style={{ padding: 20, color: C.muted, fontSize: 13, textAlign: "center" }}>
-                  <Loader2 size={20} className="animate-spin" style={{ marginBottom: 8 }} />
+                  <Loader2 size={20} style={{ ...SPIN_STYLE, marginBottom: 8 }} />
                   <div>Loading...</div>
                 </div>
               ) : repos.length === 0 ? (
@@ -387,8 +475,22 @@ export default function Dashboard() {
                       <div style={{ fontWeight: 600, fontSize: 13, color: C.text }}>
                         {repo.name}
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         {STATUS_ICON[repo.status] || <Clock size={14} />}
+                        <button
+                          onClick={e => { e.stopPropagation(); handleDeleteRepo(repo.id); }}
+                          style={{
+                            background: "transparent", border: "none",
+                            color: C.muted, cursor: "pointer", padding: 2,
+                            borderRadius: 4, display: "flex", alignItems: "center",
+                            transition: "color 0.15s",
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.color = C.red)}
+                          onMouseLeave={e => (e.currentTarget.style.color = C.muted)}
+                          title="Delete repo"
+                        >
+                          <XCircle size={13} />
+                        </button>
                       </div>
                     </div>
                     <div style={{ fontSize: 11, color: C.muted }}>
@@ -416,6 +518,34 @@ export default function Dashboard() {
               }}>
                 <Code size={40} color={C.border} />
                 <div style={{ fontSize: 14 }}>Select a repository to view analysis</div>
+              </div>
+            ) : reportLoading ? (
+              <div style={{
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                height: 400, color: C.muted, gap: 12,
+              }}>
+                <Loader2 size={32} color={C.accent} style={{ animation: "spin 1s linear infinite" }} />
+                <div style={{ fontSize: 14 }}>Loading analysis...</div>
+              </div>
+            ) : !report && selectedRepo ? (
+              <div style={{
+                display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center",
+                height: 400, color: C.muted, gap: 12,
+              }}>
+                <Clock size={40} color={C.border} />
+                <div style={{ fontSize: 14 }}>Analysis in progress — refresh in a moment</div>
+                <button
+                  onClick={() => loadReport(selectedRepo)}
+                  style={{
+                    background: C.accent + "22", border: `1px solid ${C.accent}44`,
+                    color: C.accent, borderRadius: 8, padding: "6px 16px",
+                    cursor: "pointer", fontSize: 13,
+                  }}
+                >
+                  Check again
+                </button>
               </div>
             ) : (
               <>

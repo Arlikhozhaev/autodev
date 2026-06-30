@@ -13,8 +13,7 @@ from pathlib import Path
 from typing import List
 
 import structlog
-from radon.complexity import cc_visit, cc_rank
-from radon.metrics import mi_visit
+from radon.complexity import cc_visit
 from sqlalchemy.orm import Session
 
 from app.config import settings

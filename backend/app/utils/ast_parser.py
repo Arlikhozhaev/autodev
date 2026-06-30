@@ -1,6 +1,5 @@
 """
-AST Parser — uses tree-sitter to extract structural metrics from Python files.
-Falls back to ast module if tree-sitter language pack unavailable.
+AST Parser — extracts structural metrics from Python files via the stdlib ast module.
 """
 import ast
 import os
