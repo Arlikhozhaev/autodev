@@ -1,11 +1,12 @@
 "use client";
 
 import { Suspense } from "react";
+import { useParams } from "next/navigation";
 import { Dashboard } from "@/components/dashboard/Dashboard";
 import { C, SPIN_STYLE } from "@/lib/theme";
 import { Loader2 } from "lucide-react";
 
-function HomeFallback() {
+function RepoFallback() {
   return (
     <div
       style={{
@@ -22,10 +23,16 @@ function HomeFallback() {
   );
 }
 
-export default function HomePage() {
+function RepoPageInner() {
+  const params = useParams();
+  const repoId = typeof params.id === "string" ? params.id : undefined;
+  return <Dashboard initialRepoId={repoId} />;
+}
+
+export default function RepoPage() {
   return (
-    <Suspense fallback={<HomeFallback />}>
-      <Dashboard />
+    <Suspense fallback={<RepoFallback />}>
+      <RepoPageInner />
     </Suspense>
   );
 }
