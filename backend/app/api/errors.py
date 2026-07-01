@@ -1,6 +1,7 @@
 """
 Structured API error responses.
 """
+import structlog
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -8,6 +9,8 @@ from slowapi.errors import RateLimitExceeded
 from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY, HTTP_429_TOO_MANY_REQUESTS
 
 from app.api.schemas import ErrorDetail, ErrorResponse
+
+log = structlog.get_logger()
 
 _STATUS_CODES = {
     400: "BAD_REQUEST",
@@ -56,4 +59,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=HTTP_429_TOO_MANY_REQUESTS,
             content=_error_body(HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"),
+        )
+
+    @app.exception_handler(Exception)
+    async def unhandled_exception_handler(_request: Request, exc: Exception):
+        log.exception("api.unhandled_error", error=str(exc))
+        return JSONResponse(
+            status_code=500,
+            content=_error_body(500, "Internal server error"),
         )

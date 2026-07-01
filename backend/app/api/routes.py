@@ -63,7 +63,7 @@ def analyze_repo(request: Request, req: AnalyzeRequest, db: Session = Depends(ge
     """Queue full clone → analyze → refactor → validate → PR pipeline."""
     existing = db.query(Repository).filter(
         Repository.url == req.repo_url,
-        Repository.status.in_([RepoStatus.CLONING, RepoStatus.ANALYZING]),
+        Repository.status.in_([RepoStatus.CLONING.value, RepoStatus.ANALYZING.value]),
     ).first()
     if existing:
         raise HTTPException(

@@ -3,9 +3,10 @@ Repository ORM model.
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Enum as SAEnum, Text
+from sqlalchemy import String, DateTime, Text
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
+from app.models.enums import pg_enum
 import enum
 
 
@@ -31,7 +32,7 @@ class Repository(Base):
     branch: Mapped[str] = mapped_column(String(255), default="main")
     local_path: Mapped[str] = mapped_column(String(1024), nullable=True)
     status: Mapped[RepoStatus] = mapped_column(
-        SAEnum(RepoStatus), default=RepoStatus.PENDING
+        pg_enum(RepoStatus, "repostatus"), default=RepoStatus.PENDING
     )
     error_message: Mapped[str] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

@@ -3,9 +3,10 @@ Analysis & Refactor ORM models.
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Text, Integer, Float, Boolean, ForeignKey, Enum as SAEnum
+from sqlalchemy import String, DateTime, Text, Integer, Float, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
+from app.models.enums import pg_enum
 import enum
 
 
@@ -64,8 +65,10 @@ class CodeIssue(Base):
     function_name: Mapped[str] = mapped_column(String(512), nullable=True)
     line_start: Mapped[int] = mapped_column(Integer, nullable=True)
     line_end: Mapped[int] = mapped_column(Integer, nullable=True)
-    issue_type: Mapped[IssueType] = mapped_column(SAEnum(IssueType))
-    severity: Mapped[IssueSeverity] = mapped_column(SAEnum(IssueSeverity), default=IssueSeverity.MEDIUM)
+    issue_type: Mapped[IssueType] = mapped_column(pg_enum(IssueType, "issuetype"))
+    severity: Mapped[IssueSeverity] = mapped_column(
+        pg_enum(IssueSeverity, "issueseverity"), default=IssueSeverity.MEDIUM
+    )
     description: Mapped[str] = mapped_column(Text)
     metric_value: Mapped[float] = mapped_column(Float, nullable=True)   # e.g. complexity = 18
     original_code: Mapped[str] = mapped_column(Text, nullable=True)
@@ -88,7 +91,9 @@ class RefactorSuggestion(Base):
     complexity_after: Mapped[int] = mapped_column(Integer, nullable=True)
     lines_before: Mapped[int] = mapped_column(Integer, nullable=True)
     lines_after: Mapped[int] = mapped_column(Integer, nullable=True)
-    status: Mapped[RefactorStatus] = mapped_column(SAEnum(RefactorStatus), default=RefactorStatus.PENDING)
+    status: Mapped[RefactorStatus] = mapped_column(
+        pg_enum(RefactorStatus, "refactorstatus"), default=RefactorStatus.PENDING
+    )
     validation_passed: Mapped[bool] = mapped_column(Boolean, nullable=True)
     validation_notes: Mapped[str] = mapped_column(Text, nullable=True)
     pr_url: Mapped[str] = mapped_column(String(512), nullable=True)
