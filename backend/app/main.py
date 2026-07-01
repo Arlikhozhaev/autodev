@@ -8,7 +8,9 @@ import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy import text
 
 from app.api.errors import register_exception_handlers
 from app.api.routes import router
@@ -81,3 +83,31 @@ app.include_router(router, prefix="/api/v1")
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "autodev"}
+
+
+@app.get("/ready")
+def ready():
+    """Check Postgres + Redis connectivity (for deploy probes)."""
+    checks: dict[str, str] = {}
+
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:
+        checks["database"] = f"error: {exc}"
+
+    try:
+        import redis
+
+        client = redis.from_url(settings.REDIS_URL, socket_connect_timeout=3)
+        client.ping()
+        checks["redis"] = "ok"
+    except Exception as exc:
+        checks["redis"] = f"error: {exc}"
+
+    ok = all(v == "ok" for v in checks.values())
+    return JSONResponse(
+        status_code=200 if ok else 503,
+        content={"status": "ready" if ok else "degraded", "checks": checks},
+    )

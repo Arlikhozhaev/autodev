@@ -86,7 +86,18 @@ def analyze_repo(request: Request, req: AnalyzeRequest, db: Session = Depends(ge
     db.commit()
     db.refresh(repo)
 
-    task = task_full_pipeline.delay(repo.id)
+    try:
+        task = task_full_pipeline.delay(repo.id)
+    except Exception as exc:
+        log.exception("analyze.queue_failed", repo_id=repo.id, error=str(exc))
+        repo.status = RepoStatus.FAILED
+        repo.error_message = "Failed to queue analysis task (check Redis and Celery worker)."
+        db.commit()
+        raise HTTPException(
+            status_code=503,
+            detail="Task queue unavailable. Ensure Redis is configured and the Celery worker is running.",
+        ) from exc
+
     repo.task_id = task.id
     db.commit()
 
