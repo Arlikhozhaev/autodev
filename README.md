@@ -121,8 +121,21 @@ Response:
 | `GET` | `/api/v1/repos/{id}/report` | Full analysis report + issues |
 | `GET` | `/api/v1/repos/{id}/refactors` | All refactor suggestions |
 | `POST` | `/api/v1/refactor` | Manually trigger refactor for issue |
+| `GET` | `/api/v1/tasks/{task_id}` | Poll Celery task status |
 | `GET` | `/api/v1/stats` | Global aggregate stats |
-| `GET` | `/health` | Health check |
+| `GET` | `/health` | Health check (no auth) |
+
+### Authentication
+
+When `API_KEY` is set in `.env`, all `/api/v1/*` routes require:
+
+```
+X-API-Key: your-secret-key
+# or
+Authorization: Bearer your-secret-key
+```
+
+Leave `API_KEY` empty for local development without auth.
 
 ---
 
@@ -175,6 +188,8 @@ autodev/
 │   │   └── utils/
 │   │       ├── ast_parser.py    # Python AST extraction (stdlib ast)
 │   │       └── diff_validator.py # Diff safety checks
+│   ├── alembic/                 # Database migrations
+│   │   └── versions/
 │   ├── tests/                   # pytest suite (DiffValidator, AST, API)
 │   ├── pytest.ini
 │   ├── ruff.toml
@@ -215,6 +230,17 @@ cd frontend
 npm install && npm run dev
 ```
 
+### Database migrations (Alembic)
+
+```bash
+cd backend
+# Apply all migrations (runs automatically on Docker API startup)
+alembic upgrade head
+
+# Create a new migration after model changes
+alembic revision --autogenerate -m "describe change"
+```
+
 ### Run tests
 
 ```bash
@@ -237,6 +263,9 @@ ruff check app tests
 
 - [x] CI pipeline (GitHub Actions: ruff, pytest, frontend build)
 - [x] Backend test suite (DiffValidator, AST parser, API)
+- [x] API key authentication + rate limiting
+- [x] Alembic migrations + Docker auto-migrate
+- [x] Celery task status endpoint (`GET /tasks/{id}`)
 - [ ] Multi-language support (JavaScript/TypeScript)
 - [ ] Embedding-based duplicate function detection
 - [ ] CLI: `autodev analyze ./project`

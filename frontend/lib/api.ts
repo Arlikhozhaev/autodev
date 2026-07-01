@@ -1,22 +1,31 @@
 // lib/api.ts — typed API client
+// Browser requests go through Next.js /api/v1 proxy (server adds API key).
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const BASE = "/api/v1";
+
+function authHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json" };
+}
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: { ...authHeaders(), ...options?.headers },
     ...options,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `HTTP ${res.status}`);
+    const message =
+      (err as { error?: { message?: string } }).error?.message ||
+      (err as { detail?: string }).detail ||
+      `HTTP ${res.status}`;
+    throw new Error(message);
   }
   return res.json();
 }
 
 export const api = {
   analyzeRepo: (repoUrl: string, branch = "main") =>
-    request("/analyze", {
+    request<AnalyzeResponse>("/analyze", {
       method: "POST",
       body: JSON.stringify({ repo_url: repoUrl, branch }),
     }),
@@ -26,14 +35,44 @@ export const api = {
   getReport: (id: string) => request<ReportResponse>(`/repos/${id}/report`),
   getRefactors: (id: string) => request<Refactor[]>(`/repos/${id}/refactors`),
   getStats: () => request<Stats>("/stats"),
+  getTaskStatus: (taskId: string) => request<TaskStatus>(`/tasks/${taskId}`),
   triggerRefactor: (issueId: string) =>
-    request("/refactor", { method: "POST", body: JSON.stringify({ issue_id: issueId }) }),
+    request<RefactorQueuedResponse>("/refactor", {
+      method: "POST",
+      body: JSON.stringify({ issue_id: issueId }),
+    }),
 
   deleteRepo: (id: string) =>
-    request(`/repos/${id}`, { method: "DELETE" }),
+    request<DeleteResponse>(`/repos/${id}`, { method: "DELETE" }),
 };
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface AnalyzeResponse {
+  repo_id: string;
+  task_id: string;
+  status: string;
+  message: string;
+}
+
+export interface RefactorQueuedResponse {
+  task_id: string;
+  message: string;
+}
+
+export interface DeleteResponse {
+  deleted: string;
+}
+
+export interface TaskStatus {
+  task_id: string;
+  status: string;
+  ready: boolean;
+  successful: boolean | null;
+  result: unknown;
+  error: string | null;
+  repo_id: string | null;
+}
 
 export interface Repo {
   id: string;
@@ -44,6 +83,8 @@ export interface Repo {
   branch: string;
   created_at: string;
   last_analyzed_at: string | null;
+  task_id?: string | null;
+  error_message?: string | null;
 }
 
 export interface Issue {
