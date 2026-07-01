@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "json"   # "json" | "console"
 
+    # ── Security ──────────────────────────────────────────────────────────────
+    API_KEY: str = ""   # When set, all /api/v1 routes require X-API-Key or Bearer token
+
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_DEFAULT: str = "120/minute"
+
 
 @lru_cache
 def get_settings() -> Settings:

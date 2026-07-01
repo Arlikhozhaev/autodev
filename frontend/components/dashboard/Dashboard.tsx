@@ -9,7 +9,7 @@ import { RepoSidebar } from "@/components/dashboard/RepoSidebar";
 import { RepoDetailPanel } from "@/components/dashboard/RepoDetailPanel";
 import { ConfirmModal, Toast } from "@/components/ui/Primitives";
 import { useIsMobile } from "@/hooks/useMediaQuery";
-import { api, type Repo, type Stats, type ReportResponse, type Refactor } from "@/lib/api";
+import { api, type Repo, type Stats, type ReportResponse, type Refactor, type TaskStatus } from "@/lib/api";
 import { C, type TabId } from "@/lib/theme";
 import { errorMessage } from "@/lib/utils";
 
@@ -41,6 +41,7 @@ export function Dashboard({ initialRepoId }: { initialRepoId?: string }) {
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [taskStatus, setTaskStatus] = useState<TaskStatus | null>(null);
 
   const selectedRepo = repos.find((r) => r.id === selectedRepoId) ?? null;
 
@@ -118,6 +119,31 @@ export function Dashboard({ initialRepoId }: { initialRepoId?: string }) {
     const t = setInterval(fetchAll, 8000);
     return () => clearInterval(t);
   }, [repos, fetchAll]);
+
+  useEffect(() => {
+    const taskId = selectedRepo?.task_id;
+    if (!taskId || !ACTIVE_STATUSES.includes(selectedRepo?.status ?? "")) {
+      setTaskStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const status = await api.getTaskStatus(taskId);
+        if (!cancelled) setTaskStatus(status);
+      } catch {
+        if (!cancelled) setTaskStatus(null);
+      }
+    };
+
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [selectedRepo?.task_id, selectedRepo?.status]);
 
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
@@ -307,6 +333,7 @@ export function Dashboard({ initialRepoId }: { initialRepoId?: string }) {
               refactors={refactors}
               loading={reportLoading}
               tab={tab}
+              taskStatus={taskStatus}
               onTabChange={handleTabChange}
               onRetry={() => selectedRepoId && loadReport(selectedRepoId)}
               onRefactor={handleRefactor}

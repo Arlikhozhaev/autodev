@@ -6,7 +6,7 @@ import { IssueTable } from "@/components/dashboard/IssueTable";
 import { RefactorList } from "@/components/dashboard/RefactorList";
 import { ChartsPanel } from "@/components/dashboard/ChartsPanel";
 import { C, SPIN_STYLE, type TabId } from "@/lib/theme";
-import type { ReportResponse, Refactor, Repo } from "@/lib/api";
+import type { ReportResponse, Refactor, Repo, TaskStatus } from "@/lib/api";
 
 export function RepoDetailPanel({
   repo,
@@ -14,6 +14,7 @@ export function RepoDetailPanel({
   refactors,
   loading,
   tab,
+  taskStatus,
   onTabChange,
   onRetry,
   onRefactor,
@@ -23,6 +24,7 @@ export function RepoDetailPanel({
   refactors: Refactor[];
   loading: boolean;
   tab: TabId;
+  taskStatus: TaskStatus | null;
   onTabChange: (tab: TabId) => void;
   onRetry: () => void;
   onRefactor: (issueId: string) => Promise<void>;
@@ -111,6 +113,21 @@ export function RepoDetailPanel({
   return (
     <div>
       <PipelineStepper status={repo.status} />
+      {taskStatus && !taskStatus.ready && (
+        <div
+          style={{
+            padding: "8px 16px",
+            fontSize: 12,
+            color: C.subtext,
+            borderBottom: `1px solid ${C.border}`,
+            fontFamily: "monospace",
+          }}
+        >
+          Celery task <span style={{ color: C.accent }}>{taskStatus.task_id.slice(0, 8)}…</span>
+          {" · "}
+          <span style={{ color: C.yellow }}>{taskStatus.status}</span>
+        </div>
+      )}
       <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, padding: "0 16px" }}>
         {tabs.map((t) => (
           <button

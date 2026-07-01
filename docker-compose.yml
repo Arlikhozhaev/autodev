@@ -1,7 +1,6 @@
 version: "3.9"
 
 services:
-  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -101,8 +100,10 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    env_file: .env
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      BACKEND_API_URL: http://api:8000/api/v1
+      API_KEY: ${API_KEY:-}
     depends_on:
       - api
 

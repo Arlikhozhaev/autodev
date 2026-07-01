@@ -25,6 +25,8 @@ os.environ["ANTHROPIC_API_KEY"] = "test-key"
 os.environ["GITHUB_TOKEN"] = "test-token"
 os.environ["ENV"] = "test"
 os.environ["LOG_FORMAT"] = "console"
+os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["API_KEY"] = ""
 
 from app.config import get_settings
 

@@ -8,11 +8,13 @@ import structlog
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi.middleware import SlowAPIMiddleware
 
+from app.api.errors import register_exception_handlers
+from app.api.routes import router
 from app.config import settings
 from app.database import engine, Base
-from app.api.routes import router
-
+from app.rate_limit import limiter
 
 def _configure_logging() -> None:
     level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -45,11 +47,11 @@ log = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
     log.info("autodev.startup", version="1.0.0", env=settings.ENV)
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception as e:
-        # Enum types already exist on container restart — safe to ignore
-        log.warning("autodev.db_init_warning", error=str(e))
+    if settings.ENV in ("development", "test"):
+        try:
+            Base.metadata.create_all(bind=engine)
+        except Exception as e:
+            log.warning("autodev.db_init_warning", error=str(e))
     yield
     log.info("autodev.shutdown")
 
@@ -57,10 +59,14 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AutoDev — Self-Healing Codebase Agent",
     description="Autonomous code analysis, refactoring, and PR automation.",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+register_exception_handlers(app)
+
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
