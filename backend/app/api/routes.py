@@ -238,32 +238,34 @@ def trigger_refactor(req: RefactorRequest, db: Session = Depends(get_db)):
 
 @router.get("/stats", response_model=StatsResponse, tags=["Dashboard"])
 def global_stats(db: Session = Depends(get_db)):
-    total_repos = db.query(func.count(Repository.id)).scalar() or 0
-    total_issues = db.query(func.count(CodeIssue.id)).scalar() or 0
-    prs_opened = (
-        db.query(func.count(RefactorSuggestion.id))
-        .filter(RefactorSuggestion.status == RefactorStatus.PR_OPENED)
-        .scalar()
-        or 0
-    )
-    validated = (
-        db.query(func.count(RefactorSuggestion.id))
-        .filter(RefactorSuggestion.validation_passed.is_(True))
-        .scalar()
-        or 0
-    )
+    try:
+        total_repos = db.query(func.count(Repository.id)).scalar() or 0
+        total_issues = db.query(func.count(CodeIssue.id)).scalar() or 0
+        prs_opened = (
+            db.query(func.count(RefactorSuggestion.id))
+            .filter(RefactorSuggestion.status == RefactorStatus.PR_OPENED.value)
+            .scalar()
+            or 0
+        )
+        validated = (
+            db.query(func.count(RefactorSuggestion.id))
+            .filter(RefactorSuggestion.validation_passed.is_(True))
+            .scalar()
+            or 0
+        )
 
-    avg_before = db.query(func.avg(RefactorSuggestion.complexity_before)).scalar() or 0
-    avg_after = db.query(func.avg(RefactorSuggestion.complexity_after)).scalar() or 0
+        avg_before = float(db.query(func.avg(RefactorSuggestion.complexity_before)).scalar() or 0)
+        avg_after = float(db.query(func.avg(RefactorSuggestion.complexity_after)).scalar() or 0)
 
-    return StatsResponse(
-        total_repos=total_repos,
-        total_issues=total_issues,
-        prs_opened=prs_opened,
-        validated_refactors=validated,
-        avg_complexity_before=round(float(avg_before), 2),
-        avg_complexity_after=round(float(avg_after), 2),
-        complexity_reduction_pct=round(
-            (1 - avg_after / avg_before) * 100 if avg_before else 0, 1
-        ),
-    )
+        return StatsResponse(
+            total_repos=total_repos,
+            total_issues=total_issues,
+            prs_opened=prs_opened,
+            validated_refactors=validated,
+            avg_complexity_before=round(avg_before, 2),
+            avg_complexity_after=round(avg_after, 2),
+            complexity_reduction_pct=round((1 - avg_after / avg_before) * 100 if avg_before else 0, 1),
+        )
+    except Exception as exc:
+        log.exception("stats.failed", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to load dashboard stats") from exc

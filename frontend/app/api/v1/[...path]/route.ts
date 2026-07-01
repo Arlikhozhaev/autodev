@@ -22,7 +22,17 @@ async function proxy(request: NextRequest, pathSegments: string[]) {
     init.body = await request.text();
   }
 
-  const res = await fetch(url, init);
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Backend unreachable";
+    return NextResponse.json(
+      { error: { code: "BACKEND_UNREACHABLE", message } },
+      { status: 502 }
+    );
+  }
+
   const body = await res.text();
 
   return new NextResponse(body, {

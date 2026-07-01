@@ -36,6 +36,8 @@ get_settings.cache_clear()
 @pytest.fixture
 def db_engine():
     from app.database import Base
+    import app.models.analysis  # noqa: F401 — register ORM tables on Base.metadata
+    import app.models.repo  # noqa: F401
 
     engine = create_engine(
         "sqlite://",

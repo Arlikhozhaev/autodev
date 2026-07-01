@@ -12,6 +12,10 @@ from sqlalchemy import create_engine, inspect, text
 
 from app.config import settings
 
+REQUIRED_TABLES = frozenset(
+    {"repositories", "analysis_reports", "code_issues", "refactor_suggestions"}
+)
+
 
 def _run_alembic(*args: str) -> None:
     subprocess.check_call(["alembic", "-c", "alembic.ini", *args])
@@ -28,6 +32,16 @@ def bootstrap() -> None:
     tables = set(inspect(engine).get_table_names())
 
     if "alembic_version" in tables:
+        missing = REQUIRED_TABLES - tables
+        if missing:
+            print(
+                "Incomplete schema with alembic_version "
+                f"(missing {sorted(missing)}). Resetting revision and migrating..."
+            )
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM alembic_version"))
+            _run_alembic("upgrade", "head")
+            return
         with engine.connect() as conn:
             row = conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1")).fetchone()
         if row:
@@ -35,9 +49,16 @@ def bootstrap() -> None:
             _run_alembic("upgrade", "head")
             return
 
-    if "repositories" in tables:
-        print("Legacy schema detected (tables exist, no alembic_version). Stamping head...")
-        _run_alembic("stamp", "head")
+    if REQUIRED_TABLES.intersection(tables) and "alembic_version" not in tables:
+        if REQUIRED_TABLES.issubset(tables):
+            print("Legacy schema detected (all tables, no alembic_version). Stamping head...")
+            _run_alembic("stamp", "head")
+        else:
+            print(
+                "Partial schema detected (missing tables: "
+                f"{sorted(REQUIRED_TABLES - tables)}). Running migration..."
+            )
+            _run_alembic("upgrade", "head")
         return
 
     print("Fresh database — running initial migration")

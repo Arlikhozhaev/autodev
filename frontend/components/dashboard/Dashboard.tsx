@@ -55,12 +55,19 @@ export function Dashboard({ initialRepoId }: { initialRepoId?: string }) {
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [r, s] = await Promise.all([api.listRepos(), api.getStats()]);
+      const r = await api.listRepos();
       setRepos(r);
-      setStats(s);
     } catch (e: unknown) {
       setError(errorMessage(e));
+    }
+    try {
+      const s = await api.getStats();
+      setStats(s);
+    } catch {
+      // Stats are non-critical; repos list still loads if backend is up.
+      setStats(null);
     } finally {
       setLoading(false);
     }
