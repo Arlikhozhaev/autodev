@@ -2,9 +2,24 @@
 Centralised configuration — all secrets come from environment variables.
 Copy .env.example → .env and fill in your values.
 """
+import json
 from functools import lru_cache
-from typing import List
+from typing import List, Union
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _normalize_redis_url(url: str) -> str:
+    """Railway/Heroku often provide redis://; keep as-is (redis client accepts it)."""
+    return url
+
+
+def _normalize_database_url(url: str) -> str:
+    """Railway provides postgres://; SQLAlchemy needs postgresql://."""
+    if url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://") :]
+    return url
 
 
 class Settings(BaseSettings):
@@ -14,6 +29,16 @@ class Settings(BaseSettings):
 
     # ── Database ──────────────────────────────────────────────────────────────
     DATABASE_URL: str = "postgresql://autodev:autodev@localhost:5432/autodev"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def normalize_database_url(cls, v: str) -> str:
+        return _normalize_database_url(v)
+
+    @field_validator("REDIS_URL", "CELERY_BROKER_URL", "CELERY_RESULT_BACKEND", mode="before")
+    @classmethod
+    def normalize_redis_urls(cls, v: str) -> str:
+        return _normalize_redis_url(v)
 
     # ── Redis / Celery ────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -43,7 +68,23 @@ class Settings(BaseSettings):
     REPOS_BASE_PATH: str = "/tmp/autodev_repos"
 
     # ── CORS ──────────────────────────────────────────────────────────────────
+    # Env: comma-separated URLs, JSON array, or a single URL (Railway-friendly).
     ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+
+    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @classmethod
+    def parse_allowed_origins(cls, v: Union[str, List[str]]) -> List[str]:
+        if isinstance(v, list):
+            return v
+        if not isinstance(v, str) or not v.strip():
+            return []
+        raw = v.strip()
+        if raw.startswith("["):
+            parsed = json.loads(raw)
+            if not isinstance(parsed, list):
+                raise ValueError("ALLOWED_ORIGINS JSON must be an array of strings")
+            return [str(item).strip() for item in parsed if str(item).strip()]
+        return [part.strip() for part in raw.split(",") if part.strip()]
 
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = "INFO"

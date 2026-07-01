@@ -18,7 +18,13 @@ def _run_alembic(*args: str) -> None:
 
 
 def bootstrap() -> None:
-    engine = create_engine(settings.DATABASE_URL)
+    db_url = settings.DATABASE_URL
+    if settings.ENV == "production" and ("localhost" in db_url or "127.0.0.1" in db_url):
+        raise RuntimeError(
+            "DATABASE_URL points to localhost in production. On Railway, reference your "
+            "Postgres service variable (DATABASE_URL=${{Postgres.DATABASE_URL}}) and redeploy."
+        )
+    engine = create_engine(db_url)
     tables = set(inspect(engine).get_table_names())
 
     if "alembic_version" in tables:
