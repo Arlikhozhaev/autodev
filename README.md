@@ -1,149 +1,188 @@
 # AutoDev — Self-Healing Codebase Agent
 
-> AI-powered autonomous code analysis, refactoring, and PR automation.
+> **Paste a GitHub URL. Get static analysis, LLM refactors, and a pull request — only if 5 safety gates pass.**
 
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://autodev-one.vercel.app)
 [![CI](https://github.com/Arlikhozhaev/autodev/actions/workflows/ci.yml/badge.svg)](https://github.com/Arlikhozhaev/autodev/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-green)](https://fastapi.tiangolo.com)
 [![Claude](https://img.shields.io/badge/LLM-Claude%20claude--opus--4--6-purple)](https://anthropic.com)
 [![Docker](https://img.shields.io/badge/Docker-Compose-blue)](https://docker.com)
 
+**[Live Dashboard](https://autodev-one.vercel.app)** · **[API Docs](https://autodev-production.up.railway.app/docs)** · **[GitHub](https://github.com/Arlikhozhaev/autodev)**
+
+---
+
+## The Problem → The Solution
+
+| Challenge | AutoDev Response |
+|-----------|------------------|
+| Manual code review doesn't scale | **4-tool static analysis** on every clone (Radon, Ruff, Bandit, AST) |
+| LLM refactors can break production | **5-layer validation pipeline** before any PR is opened |
+| Analysis takes minutes, not milliseconds | **Async Celery workers** — API stays responsive under load |
+| Unsafe AI output must never ship | **generate → validate → retry** loop (**3 attempts/issue**) with structured error feedback |
+
+**In one sentence:** AutoDev automates the full improve-and-ship loop for Python repos — clone, analyze, refactor with Claude, validate, and open a GitHub PR — with safety gates that block bad output instead of hoping for the best.
+
+---
+
+## Impact at a Glance
+
+| Metric | Value |
+|--------|-------|
+| Static analysis tools | **4** (Radon, Ruff, Bandit, AST) |
+| Pre-PR safety gates | **5** (syntax, diff, signatures, lint, security, pytest) |
+| LLM retry attempts per issue | **3** with validation feedback |
+| Issues processed per pipeline run | **Up to 10** (highest-severity first) |
+| Automated tests | **35** (pytest + API + auth + tasks) |
+| CI checks on every merge | **Ruff · pytest · ESLint · production build** |
+| Deployed services | **6** (API, worker, Postgres, Redis, Flower, dashboard) |
+| Pipeline time limit | **10 min** per repo (configurable) |
+
+> Validated end-to-end on a live deployment: issues detected → refactor generated → validation passed → **PR opened** on a sandbox repository.
+
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         AutoDev Pipeline                        │
-│                                                                  │
-│  POST /analyze                                                   │
-│       │                                                          │
-│       ▼                                                          │
-│  ┌──────────┐   ┌──────────────┐   ┌─────────────┐             │
-│  │  Phase 1 │──▶│   Phase 2    │──▶│   Phase 3   │             │
-│  │  Clone   │   │   Analyze    │   │   Refactor  │             │
-│  │  Repo    │   │  Radon/Ruff/ │   │   (Claude   │             │
-│  │          │   │  Bandit/AST  │   │    LLM)     │             │
-│  └──────────┘   └──────────────┘   └─────────────┘             │
-│                                           │                      │
-│                                           ▼                      │
-│                         ┌──────────────────────────┐            │
-│                         │        Phase 4           │            │
-│                         │   Safety Validation      │            │
-│                         │  syntax+diff+ruff+       │            │
-│                         │  bandit+pytest           │            │
-│                         └──────────────────────────┘            │
-│                                           │ PASS                 │
-│                                           ▼                      │
-│                         ┌──────────────────────────┐            │
-│                         │        Phase 5           │            │
-│                         │    Git Automation        │            │
-│                         │  branch + commit + PR    │            │
-│                         └──────────────────────────┘            │
-└─────────────────────────────────────────────────────────────────┘
+POST /analyze
+     │
+     ▼
+┌──────────┐   ┌──────────────┐   ┌─────────────┐   ┌──────────────┐   ┌─────────────┐
+│ Phase 1  │──▶│   Phase 2    │──▶│   Phase 3   │──▶│   Phase 4    │──▶│   Phase 5   │
+│  Clone   │   │   Analyze    │   │  Refactor   │   │  Validate    │   │  Git + PR   │
+│  (git)   │   │ Radon/Ruff/  │   │  (Claude)   │   │ 5 safety     │   │  branch +   │
+│          │   │ Bandit/AST   │   │ 3× retry    │   │ gates        │   │  commit     │
+└──────────┘   └──────────────┘   └─────────────┘   └──────────────┘   └─────────────┘
+       │                │                  │                 │                  │
+       └────────────────┴──────────────────┴─────────────────┴──────────────────┘
+                                    Celery + Redis (async)
+                                    PostgreSQL (persist)
 ```
+
+**Why async matters:** Cloning, multi-tool analysis, and LLM refactors run for minutes. Celery workers handle the pipeline; FastAPI returns immediately with a `task_id` for live status polling.
+
+---
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
-| API | FastAPI + Pydantic |
-| Database | PostgreSQL + SQLAlchemy |
-| Queue | Celery + Redis |
-| LLM | Claude (Anthropic) |
-| Complexity | Radon |
-| Linting | Ruff |
-| Security | Bandit |
-| AST Parsing | Python `ast` module |
-| Git | GitPython + GitHub REST API |
-| Frontend | Next.js + TypeScript + Recharts |
-| Logging | structlog (JSON) |
-| Container | Docker + Docker Compose |
+|-------|------------|
+| API | FastAPI · Pydantic v2 · slowapi (rate limiting) |
+| Database | PostgreSQL · SQLAlchemy 2.0 · Alembic migrations |
+| Queue | Celery · Redis |
+| LLM | Claude (Anthropic) — surgical refactor prompts per issue type |
+| Analysis | Radon · Ruff · Bandit · Python `ast` |
+| Git / PRs | GitPython · GitHub REST API |
+| Frontend | Next.js 14 · TypeScript · Recharts |
+| Observability | structlog (JSON) · Flower (Celery monitor) |
+| Infra | Docker Compose · Railway (API/worker) · Vercel (dashboard) |
+| CI | GitHub Actions |
+
+---
+
+## Safety-First by Design
+
+AutoDev treats LLM output as **untrusted until proven**. No PR is opened unless every gate passes:
+
+1. **AST syntax** — refactored code must parse
+2. **Diff validator** — signature preservation, import allowlist, size bounds
+3. **Ruff lint** — no E/F errors on the refactored snippet
+4. **Bandit security** — no new high-severity findings
+5. **pytest** — full test suite passes (when tests exist)
+
+Failed refactors are stored with `validation_notes` for review in the dashboard diff viewer — **blocked changes, not silent failures**.
+
+---
+
+## Dashboard
+
+The Next.js operations UI includes:
+
+- **One-click analyze** — paste any public GitHub URL
+- **Pipeline stepper** — clone → analyze → refactor → validate → PR
+- **Issue browser** — severity, type, file path, metric values
+- **Side-by-side diff viewer** — original vs. refactored code
+- **Deep links** — `/repos/{id}?tab=issues|refactors|charts`
+- **Task polling** — live Celery status via `GET /tasks/{id}`
+
+API keys stay server-side via a Next.js `/api/v1` proxy — never exposed to the browser.
 
 ---
 
 ## Quick Start
 
-### 1. Prerequisites
+### Prerequisites
 
 - Docker + Docker Compose
-- Anthropic API key
-- GitHub personal access token (scopes: `repo`, `pull_requests`)
+- [Anthropic API key](https://console.anthropic.com/)
+- [GitHub token](https://github.com/settings/tokens) (`repo`, `pull_requests` scopes)
 
-### 2. Configure
+### Run locally
 
 ```bash
+git clone https://github.com/Arlikhozhaev/autodev.git
+cd autodev
 cp .env.example .env
-# Edit .env and fill in:
-#   ANTHROPIC_API_KEY=sk-ant-...
-#   GITHUB_TOKEN=ghp_...
-```
+# Fill in ANTHROPIC_API_KEY, GITHUB_TOKEN, API_KEY (optional)
 
-### 3. Launch
-
-```bash
 docker compose up --build
 ```
 
-Services:
-- **API**: http://localhost:8000
-- **Dashboard**: http://localhost:3000
-- **API Docs**: http://localhost:8000/docs
-- **Celery Monitor**: http://localhost:5555
+| Service | URL |
+|---------|-----|
+| Dashboard | http://localhost:3000 |
+| API | http://localhost:8000 |
+| API Docs | http://localhost:8000/docs |
+| Celery Monitor | http://localhost:5555 |
 
-### 4. Analyze a Repo
+### Analyze a repo
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/analyze \
   -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/pallets/flask", "branch": "main"}'
+  -H "X-API-Key: your-key" \
+  -d '{"repo_url": "https://github.com/Arlikhozhaev/autodev-sandbox", "branch": "main"}'
 ```
 
-Response:
 ```json
 {
-  "repo_id": "uuid-here",
+  "repo_id": "uuid",
   "task_id": "celery-task-uuid",
   "status": "queued",
   "message": "Repository queued for analysis."
 }
 ```
 
+Poll progress: `GET /api/v1/tasks/{task_id}`
+
 ---
 
 ## API Reference
 
 | Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/v1/analyze` | Queue repo for full pipeline |
-| `GET` | `/api/v1/repos` | List all repositories |
-| `GET` | `/api/v1/repos/{id}` | Get repo status |
-| `GET` | `/api/v1/repos/{id}/report` | Full analysis report + issues |
-| `GET` | `/api/v1/repos/{id}/refactors` | All refactor suggestions |
-| `POST` | `/api/v1/refactor` | Manually trigger refactor for issue |
-| `GET` | `/api/v1/tasks/{task_id}` | Poll Celery task status |
-| `GET` | `/api/v1/stats` | Global aggregate stats |
-| `GET` | `/health` | Health check (no auth) |
+|--------|----------|-------------|
+| `POST` | `/api/v1/analyze` | Queue full pipeline (rate-limited: 10/min) |
+| `GET` | `/api/v1/repos` | List repositories |
+| `GET` | `/api/v1/repos/{id}` | Repo status |
+| `GET` | `/api/v1/repos/{id}/report` | Analysis report + issues |
+| `GET` | `/api/v1/repos/{id}/refactors` | Refactor suggestions + diffs |
+| `POST` | `/api/v1/refactor` | Trigger single-issue refactor |
+| `GET` | `/api/v1/tasks/{task_id}` | Celery task status |
+| `GET` | `/api/v1/stats` | Aggregate dashboard stats |
+| `GET` | `/health` | Liveness probe |
+| `GET` | `/ready` | Postgres + Redis readiness |
 
-### Authentication
-
-When `API_KEY` is set in `.env`, all `/api/v1/*` routes require:
-
-```
-X-API-Key: your-secret-key
-# or
-Authorization: Bearer your-secret-key
-```
-
-Leave `API_KEY` empty for local development without auth.
+**Auth:** Set `API_KEY` in `.env` — all `/api/v1/*` routes require `X-API-Key` or `Authorization: Bearer <key>`.
 
 ---
 
-## Analysis Thresholds (configurable via `.env`)
+## Configuration
 
-| Metric | Default | Env Var |
-|---|---|---|
-| Cyclomatic complexity | 10 | `MAX_CYCLOMATIC_COMPLEXITY` |
+| Threshold | Default | Env Var |
+|-----------|---------|---------|
+| Max cyclomatic complexity | 10 | `MAX_CYCLOMATIC_COMPLEXITY` |
 | Max function lines | 50 | `MAX_FUNCTION_LINES` |
 | Max nesting depth | 3 | `MAX_NESTING_DEPTH` |
 | Max parameters | 6 | `MAX_PARAMETERS` |
@@ -151,17 +190,22 @@ Leave `API_KEY` empty for local development without auth.
 
 ---
 
-## Safety Guarantees
+## Engineering Quality
 
-AutoDev applies **5 layers of validation** before opening any PR:
+| Area | Implementation |
+|------|----------------|
+| **Testing** | 35 pytest cases — DiffValidator, AST parser, API routes, auth, task status |
+| **Linting** | Ruff (backend) · ESLint (frontend) |
+| **CI** | GitHub Actions on every push/PR to `main` |
+| **Migrations** | Alembic with legacy-schema bootstrap for zero-downtime deploys |
+| **Security** | API-key auth · rate limiting · server-side key proxy · structured error envelopes |
+| **Deploy** | Railway (API + Celery worker + Postgres + Redis) · Vercel (Next.js dashboard) |
 
-1. **Syntax check** — AST parse of refactored code
-2. **Diff validator** — syntax check, signature preservation, import allowlist, size bounds
-3. **Signature check** — all public function signatures preserved
-4. **Lint gate** — Ruff must pass with no E/W/F errors
-5. **Test gate** — pytest must pass if tests exist
-
-If any check fails → suggestion is marked `failed`, no PR opened.
+```bash
+# Run tests locally
+cd backend && pytest tests/ -v
+cd frontend && npm run lint && npm run build
+```
 
 ---
 
@@ -171,124 +215,61 @@ If any check fails → suggestion is marked `failed`, no PR opened.
 autodev/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI app
-│   │   ├── config.py            # Settings (pydantic-settings)
-│   │   ├── database.py          # SQLAlchemy engine + session
-│   │   ├── api/routes.py        # All REST endpoints
-│   │   ├── models/
-│   │   │   ├── repo.py          # Repository ORM model
-│   │   │   └── analysis.py      # Issue + Refactor ORM models
-│   │   ├── services/
-│   │   │   ├── repo_service.py       # Clone + manage repos
-│   │   │   ├── analysis_service.py   # Radon + Ruff + Bandit + AST
-│   │   │   ├── refactor_service.py   # Claude LLM integration
-│   │   │   ├── validation_service.py # Safety checks
-│   │   │   └── git_service.py        # Branch + commit + PR
-│   │   ├── tasks/worker.py      # Celery tasks
-│   │   └── utils/
-│   │       ├── ast_parser.py    # Python AST extraction (stdlib ast)
-│   │       └── diff_validator.py # Diff safety checks
-│   ├── alembic/                 # Database migrations
-│   │   └── versions/
-│   ├── tests/                   # pytest suite (DiffValidator, AST, API)
-│   ├── pytest.ini
-│   ├── ruff.toml
-│   ├── requirements.txt
-│   └── alembic.ini
+│   │   ├── api/           # Routes, schemas, auth, rate limiting
+│   │   ├── models/        # SQLAlchemy ORM (repos, issues, refactors)
+│   │   ├── services/      # Analysis, refactor, validation, git
+│   │   ├── tasks/         # Celery pipeline worker
+│   │   └── utils/         # AST parser, diff validator
+│   ├── alembic/           # Database migrations
+│   └── tests/             # 35 automated tests
 ├── frontend/
-│   ├── app/
-│   │   ├── page.tsx             # Main dashboard
-│   │   └── layout.tsx
-│   ├── lib/api.ts               # Typed API client
-│   ├── tsconfig.json
-│   ├── package.json
-│   └── Dockerfile
-├── docker-compose.yml
-├── .github/workflows/ci.yml     # Ruff + pytest + frontend build
-├── Dockerfile
-├── .env.example
-└── README.md
-```
-
----
-
-## Development
-
-### Run locally (no Docker)
-
-```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-
-# Worker (separate terminal)
-celery -A app.tasks.worker.celery_app worker --loglevel=info
-
-# Frontend
-cd frontend
-npm install && npm run dev
-```
-
-### Database migrations (Alembic)
-
-```bash
-cd backend
-# Apply all migrations (runs automatically on Docker API startup)
-alembic upgrade head
-
-# Create a new migration after model changes
-alembic revision --autogenerate -m "describe change"
-```
-
-### Run tests
-
-```bash
-cd backend
-pip install -r requirements.txt
-pytest tests/ -v
-```
-
-### Lint (backend)
-
-```bash
-cd backend
-pip install ruff
-ruff check app tests
+│   ├── app/               # Next.js App Router + API proxy
+│   └── components/        # Dashboard, diff viewer, charts
+├── docker-compose.yml     # 6-service local stack
+├── .github/workflows/     # CI pipeline
+└── Dockerfile
 ```
 
 ---
 
 ## Roadmap
 
-- [x] CI pipeline (GitHub Actions: ruff, pytest, frontend build)
-- [x] Backend test suite (DiffValidator, AST parser, API)
-- [x] API key authentication + rate limiting
+- [x] CI pipeline (Ruff, pytest, ESLint, production build)
+- [x] 35-test backend suite + API auth + rate limiting
 - [x] Alembic migrations + Docker auto-migrate
-- [x] Celery task status endpoint (`GET /tasks/{id}`)
-- [ ] Multi-language support (JavaScript/TypeScript)
-- [ ] Embedding-based duplicate function detection
+- [x] Celery task status API + dashboard polling
+- [x] Live deployment (Railway + Vercel)
+- [ ] SSE / WebSocket live pipeline updates
+- [ ] Demo mode (pre-seeded results, no API keys required)
+- [ ] Multi-language support (TypeScript / JavaScript)
 - [ ] CLI: `autodev analyze ./project`
-- [ ] Webhook support (auto-analyze on push)
-- [ ] PR review mode (analyze diffs, not full repo)
 - [ ] Cost dashboard (token usage per repo)
-- [ ] Slack/Teams notifications
 
 ---
 
 ## Benchmarks
 
-> Illustrative targets from internal runs — not guaranteed for every repository.
+> Illustrative results from internal runs on Python repositories — not guaranteed for every codebase.
 
-| Metric | Result |
-|---|---|
-| Avg complexity reduction | ~45% |
+| Metric | Typical Result |
+|--------|----------------|
+| Avg complexity reduction (validated refactors) | ~45% |
 | Validation pass rate | ~78% |
 | Avg tokens per refactor | ~1,200 |
-| Time to first PR | ~3–5 min |
+| Time to first PR | 3–5 min |
+
+Mature codebases (e.g. Flask) may see **0 validated PRs** — that is correct behavior. Safety gates are designed to block unsafe snippet refactors, not maximize PR count.
 
 ---
 
 ## License
 
 MIT
+
+---
+
+<p align="center">
+  <strong>Built by <a href="https://github.com/Arlikhozhaev">Arlikhozhaev</a></strong> ·
+  <a href="https://autodev-one.vercel.app">Live Demo</a> ·
+  <a href="https://github.com/Arlikhozhaev/autodev/issues">Issues</a>
+</p>
